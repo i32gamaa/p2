@@ -16,7 +16,7 @@ int main ( )
 	/*---------------------------------------------------- 
 		Descriptor del socket y buffer de datos                
 	-----------------------------------------------------*/
-	int sd; // descriptor del socket
+	int sd; // Descriptor del socket
 	struct sockaddr_in sockname;
 	char buffer[250];
 	socklen_t len_sockname;
@@ -97,17 +97,20 @@ int main ( )
 			int n = recv(sd, buffer, sizeof(buffer)-1, 0);
 			if(n > 0){
 				buffer[n] = '\0';
+				// recortar posibles \r y \n del final
+				int LB = strlen(buffer);
+				while(LB>0 && (buffer[LB-1]=='\n' || buffer[LB-1]=='\r')){ buffer[LB-1] = '\0'; LB--; }
 				printf("\n%s\n", buffer);
 
-				// Actualizar estado de autenticación local si el servidor lo confirma
-				if(strcmp(buffer, "+Ok. Usuario validado") == 0) autenticado = 1;
-				if(strcmp(buffer, "-Err. Usuario incorrecto") == 0) autenticado = 0;
-				if(strcmp(buffer, "-Err. Error en la validación") == 0) autenticado = 0;
+				// Actualizar estado de autenticación local si el servidor lo confirma (buscar substring)
+				if(strstr(buffer, "+Ok. Usuario validado") != NULL) autenticado = 1;
+				if(strstr(buffer, "-Err. Usuario incorrecto") != NULL) autenticado = 0;
+				if(strstr(buffer, "-Err. Error en la validación") != NULL) autenticado = 0;
 
-				if(strcmp(buffer,"Demasiados clientes conectados\n") == 0)
+				if(strcmp(buffer,"Demasiados clientes conectados") == 0)
 					fin =1;
 
-				if(strcmp(buffer,"Desconexión servidor\n") == 0)
+				if(strcmp(buffer,"Desconexión servidor") == 0)
 					fin =1;
 			} else if(n == 0) {
 				// servidor cerró
@@ -131,15 +134,8 @@ int main ( )
 				int L = strlen(buffer);
 				if(L>0 && buffer[L-1]=='\n') buffer[L-1] = '\0';
 
-				// Si no está autenticado, permitir USUARIO, PASSWORD, REGISTRO o INICIAR-PARTIDA (el servidor validará)
-				if(!autenticado){
-					if(strncmp(buffer, "USUARIO ", 8) != 0 && strncmp(buffer, "PASSWORD ", 9) != 0 
-					   && strncmp(buffer, "REGISTRO ", 9) != 0 && strcmp(buffer, "SALIR") != 0
-					   && strcmp(buffer, "INICIAR-PARTIDA") != 0){
-						printf("Debe autenticarse primero con 'USUARIO usuario' y 'PASSWORD password' (o usar 'REGISTRO -u usuario -p password')\n");
-						continue;
-					}
-				}
+				// No bloquear localmente comandos de juego o INICIAR-PARTIDA: el servidor valida la autenticación y permisos.
+				// (Conservar validaciones locales solo para mejorar UX podría añadirse, pero preferimos confiar en el servidor.)
 
 				// Si el usuario escribe SALIR (sin newline) cerramos
 				if(strcmp(buffer,"SALIR") == 0){
