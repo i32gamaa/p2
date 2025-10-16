@@ -367,65 +367,8 @@ int main ( )
                                     // Si no se encontró índice, ignorar
                                     if(idx == -1) continue;
 
-                                    // Permitir INICIAR-PARTIDA tanto si está autenticado como si no (el cliente lo acepta antes de autenticarse)
-                                    if(strcmp(buffer, "INICIAR-PARTIDA") == 0){
-                                        int idx_cliente = idx;
-                                        // Si ya está en juego, ignorar
-                                        if(in_game[idx_cliente]){
-                                            bzero(buffer,sizeof(buffer));
-                                            strcpy(buffer, "-Err. Ya en partida\n");
-                                            send(i, buffer, strlen(buffer), 0);
-                                        } else {
-                                            if(waiting_socket == -1){
-                                                // No hay nadie esperando: ponerlo en espera
-                                                waiting_socket = i;
-                                                bzero(buffer,sizeof(buffer));
-                                                strcpy(buffer, "+Ok. Esperando otro jugador\n");
-                                                send(i, buffer, strlen(buffer), 0);
-                                            } else {
-                                                // Hay alguien esperando: formar pareja si no es el mismo socket
-                                                if(waiting_socket == i){
-                                                    bzero(buffer,sizeof(buffer));
-                                                    strcpy(buffer, "-Err. Ya estás esperando otro jugador\n");
-                                                    send(i, buffer, strlen(buffer), 0);
-                                                } else {
-                                                    int other = waiting_socket;
-                                                    int idx_other = -1;
-                                                    for(j=0;j<numClientes;j++) if(arrayClientes[j] == other){ idx_other = j; break; }
-                                                    int idx_this = idx_cliente;
-                                                    int objetivo = rand() % 100 + 1; // número objetivo 1..100
-                                                    in_game[idx_other] = 1;
-                                                    in_game[idx_this] = 1;
-                                                    game_target[idx_other] = objetivo;
-                                                    game_target[idx_this] = objetivo;
-                                                    // Inicializar estado de partida para ambos
-                                                    partner_socket[idx_other] = i;
-                                                    partner_socket[idx_this] = other;
-                                                    score[idx_other] = 0;
-                                                    score[idx_this] = 0;
-                                                    last_roll_num[idx_other] = 0;
-                                                    last_roll_num[idx_this] = 0;
-                                                    last_roll_values[idx_other][0] = last_roll_values[idx_other][1] = 0;
-                                                    last_roll_values[idx_this][0] = last_roll_values[idx_this][1] = 0;
-                                                    passes_used[idx_other] = 0;
-                                                    passes_used[idx_this] = 0;
-                                                    planted[idx_other] = 0;
-                                                    planted[idx_this] = 0;
-                                                    // decidir primer turno: el que inició queda como owner
-                                                    turn_owner[idx_this] = 1;
-                                                    turn_owner[idx_other] = 0;
-                                                    // enviar a ambos
-                                                    char msgpart[MSG_SIZE];
-                                                    snprintf(msgpart, sizeof(msgpart), "+Ok. Empieza la partida. NÚMERO OBJETIVO: [%d]\n", objetivo);
-                                                    send(other, msgpart, strlen(msgpart), 0);
-                                                    send(i, msgpart, strlen(msgpart), 0);
-                                                    // liberar waiting
-                                                    waiting_socket = -1;
-                                                }
-                                            }
-                                        }
-                                        continue; // procesado INICIAR-PARTIDA, pasar al siguiente
-                                    }
+                                    /* INICIAR-PARTIDA sólo se procesa cuando el cliente está autenticado.
+                                       El manejo de inicio de partida está más abajo en la rama de clientes autenticados. */
 
                                     // Si no autenticado, procesar USUARIO/PASSWORD/REGISTRO
                                     if(autenticado[idx] == 0){
@@ -438,7 +381,8 @@ int main ( )
                                                 send(i, buffer, strlen(buffer), 0);
                                                 // guardar índice del usuario para este cliente
                                                 user_index_by_client[idx] = found;
-                                                strncpy(usernames[idx], user, sizeof(usernames[idx])-1);
+                                                // copiar nombre de usuario desde la lista de validos (fuente única)
+                                                strncpy(usernames[idx], validos[found].login, sizeof(usernames[idx])-1);
                                                 usernames[idx][sizeof(usernames[idx])-1] = '\0';
                                             } else {
                                                 bzero(buffer,sizeof(buffer));
@@ -511,6 +455,13 @@ int main ( )
                                                         bzero(buffer,sizeof(buffer));
                                                         strcpy(buffer, "+Ok. Registro completado\n");
                                                         send(i, buffer, strlen(buffer), 0);
+                                                        // asignar username al cliente desde validos (último añadido)
+                                                        int new_idx = find_user_index(usertmp);
+                                                        if(new_idx != -1){
+                                                            user_index_by_client[idx] = new_idx;
+                                                            strncpy(usernames[idx], validos[new_idx].login, sizeof(usernames[idx])-1);
+                                                            usernames[idx][sizeof(usernames[idx])-1] = '\0';
+                                                        }
                                                     } else {
                                                         bzero(buffer,sizeof(buffer));
                                                         strcpy(buffer, "-Err. No se pudo guardar usuario\n");
@@ -565,7 +516,7 @@ int main ( )
                                                         int idx_other = -1;
                                                         for(j=0;j<numClientes;j++) if(arrayClientes[j] == other){ idx_other = j; break; }
                                                         int idx_this = idx_cliente;
-                                                        int objetivo = rand() % 100 + 1; // número objetivo 1..100
+                                                        int objetivo = rand() % 10 + 5; // número objetivo [60,200]
                                                         in_game[idx_other] = 1;
                                                         in_game[idx_this] = 1;
                                                         game_target[idx_other] = objetivo;
@@ -619,7 +570,7 @@ int main ( )
                                                             send(i, buffer, strlen(buffer), 0);
                                                         } else if(planted[idx]){
                                                             bzero(buffer,sizeof(buffer));
-                                                            strcpy(buffer, "-Err. Ya te has plantado\n");
+                                                            strcpy(buffer, "-Err. No puedes tirar dados, ya te has plantado\n");
                                                             send(i, buffer, strlen(buffer), 0);
                                                         } else {
                                                             // tirar n dados
@@ -665,7 +616,7 @@ int main ( )
                                                                     char ganador_msg[MSG_SIZE];
                                                                     // usar nombres si existen
                                                                     if(usernames[idx_partner][0] != '\0' && usernames[idx][0] != '\0'){
-                                                                        snprintf(ganador_msg, sizeof(ganador_msg), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx_partner]);
+                                                                        snprintf(ganador_msg, sizeof(ganador_msg), "Felicidades %s has ganado la partida!!\n", usernames[idx_partner]);
                                                                     } else {
                                                                         snprintf(ganador_msg, sizeof(ganador_msg), "+Ok. Tu oponente ha perdido y tú has ganado la partida.\n");
                                                                     }
@@ -746,74 +697,83 @@ int main ( )
                                                         }
                                                     }
                                                 } else if(strcmp(buffer, "PLANTARME") == 0){
-                                                    // plantarme: marcar como plantado
-                                                    planted[idx] = 1;
-                                                    int partner = partner_socket[idx];
-                                                    int idx_partner = -1;
-                                                    for(j=0;j<numClientes;j++) if(arrayClientes[j] == partner){ idx_partner = j; break; }
-                                                    // Si no hay partner registrado (error), solo confirmar plantado
-                                                    if(idx_partner == -1){
+                                                    // permitir plantarme solo una vez por jugador
+                                                    if(planted[idx]){
                                                         bzero(buffer,sizeof(buffer));
-                                                        strcpy(buffer, "+Ok. Te has plantado\n");
+                                                        strcpy(buffer, "-Err. Ya te has plantado\n");
                                                         send(i, buffer, strlen(buffer), 0);
-                                                        in_game[idx] = 0; partner_socket[idx] = -1; turn_owner[idx] = 0;
                                                     } else {
-                                                        // Si el partner ya estaba plantado -> decidir resultado (ambos plantados)
-                                                        if(planted[idx_partner]){
-                                                            // ambos plantados: revisar si alguno excedió
-                                                            if(score[idx] > game_target[idx] && score[idx_partner] > game_target[idx_partner]){
-                                                                char msg[MSG_SIZE];
-                                                                snprintf(msg, sizeof(msg), "+Ok. Jugador %s y Jugador %s habéis empatado la partida.\n", usernames[idx], usernames[idx_partner]);
-                                                                send(i, msg, strlen(msg), 0);
-                                                                send(partner, msg, strlen(msg), 0);
-                                                            } else if(score[idx] > game_target[idx]){
-                                                                char msgp[MSG_SIZE];
-                                                                snprintf(msgp, sizeof(msgp), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx_partner]);
-                                                                send(partner, msgp, strlen(msgp), 0);
-                                                                send(i, msgp, strlen(msgp), 0);
-                                                            } else if(score[idx_partner] > game_target[idx_partner]){
-                                                                char msgp[MSG_SIZE];
-                                                                snprintf(msgp, sizeof(msgp), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx]);
-                                                                send(i, msgp, strlen(msgp), 0);
-                                                                send(partner, msgp, strlen(msgp), 0);
-                                                            } else {
-                                                                // ninguno excedido: comparar cercanía al objetivo
-                                                                int diff1 = game_target[idx] - score[idx];
-                                                                int diff2 = game_target[idx_partner] - score[idx_partner];
-                                                                if(diff1 == diff2){
-                                                                    char msg[MSG_SIZE];
-                                                                    snprintf(msg, sizeof(msg), "+Ok. Jugador %s y Jugador %s habéis empatado la partida.\n", usernames[idx], usernames[idx_partner]);
-                                                                    send(i, msg, strlen(msg), 0);
-                                                                    send(partner, msg, strlen(msg), 0);
-                                                                } else if(diff1 < diff2){
-                                                                    char msg[MSG_SIZE];
-                                                                    snprintf(msg, sizeof(msg), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx]);
-                                                                    send(i, msg, strlen(msg), 0);
-                                                                    send(partner, msg, strlen(msg), 0);
-                                                                } else {
-                                                                    char msg[MSG_SIZE];
-                                                                    snprintf(msg, sizeof(msg), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx_partner]);
-                                                                    send(i, msg, strlen(msg), 0);
-                                                                    send(partner, msg, strlen(msg), 0);
-                                                                }
-                                                            }
-                                                            // finalizar partida
-                                                            in_game[idx] = 0; in_game[idx_partner] = 0;
-                                                            partner_socket[idx] = -1; partner_socket[idx_partner] = -1;
-                                                            planted[idx] = 0; planted[idx_partner] = 0;
-                                                            turn_owner[idx] = 0; turn_owner[idx_partner] = 0;
-                                                        } else {
-                                                            // primer jugador en plantarse: esperar al otro
+                                                        // marcar como plantado
+                                                        planted[idx] = 1;
+                                                        int partner = partner_socket[idx];
+                                                        int idx_partner = -1;
+                                                        for(j=0;j<numClientes;j++) if(arrayClientes[j] == partner){ idx_partner = j; break; }
+                                                        // Si no hay partner registrado (error), solo confirmar plantado y limpiar partida local
+                                                        if(idx_partner == -1){
                                                             bzero(buffer,sizeof(buffer));
-                                                            strcpy(buffer, "+Ok. Esperando que finalice el otro jugador.\n");
+                                                            strcpy(buffer, "+Ok. Te has plantado\n");
                                                             send(i, buffer, strlen(buffer), 0);
-                                                            // cambiar turno al partner para que pueda decidir plantarse o seguir
-                                                            turn_owner[idx] = 0;
-                                                            turn_owner[idx_partner] = 1;
-                                                            // notificar al partner que es su turno
-                                                            bzero(buffer,sizeof(buffer));
-                                                            strcpy(buffer, "+Ok. Es tu turno\n");
-                                                            send(partner, buffer, strlen(buffer), 0);
+                                                            in_game[idx] = 0; partner_socket[idx] = -1; turn_owner[idx] = 0;
+                                                        } else {
+                                                            // Si el partner ya estaba plantado -> decidir resultado (ambos plantados)
+                                                            if(planted[idx_partner]){
+                                                                int s1 = score[idx];
+                                                                int s2 = score[idx_partner];
+                                                                int objetivo = game_target[idx];
+
+                                                                // Caso empate: si ambos se pasaron, o ambos tienen misma puntuación y ninguno excede
+                                                                if((s1 > objetivo && s2 > objetivo) || (s1 == s2 && s1 <= objetivo)){
+                                                                    char empate[MSG_SIZE];
+                                                                    snprintf(empate, sizeof(empate), "+Ok. Jugador %s y Jugador %s habéis empatado la partida.\n", usernames[idx], usernames[idx_partner]);
+                                                                    send(i, empate, strlen(empate), 0);
+                                                                    send(partner, empate, strlen(empate), 0);
+                                                                } else {
+                                                                    // decidir ganador: quien esté más próximo al objetivo sin haberse pasado
+                                                                    // si uno se pasó y el otro no, el que no se pasó gana
+                                                                    int winner = -1; // 0 -> idx, 1 -> partner
+                                                                    if(s1 > objetivo && s2 <= objetivo) winner = 1;
+                                                                    else if(s2 > objetivo && s1 <= objetivo) winner = 0;
+                                                                    else {
+                                                                        int diff1 = objetivo - s1;
+                                                                        int diff2 = objetivo - s2;
+                                                                        if(diff1 < diff2) winner = 0; else winner = 1;
+                                                                    }
+                                                                    if(winner == 0){
+                                                                        char msgw[MSG_SIZE];
+                                                                        snprintf(msgw, sizeof(msgw), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx]);
+                                                                        char msgr[MSG_SIZE];
+                                                                        snprintf(msgr, sizeof(msgr), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx]);
+                                                                        send(i, msgw, strlen(msgw), 0);
+                                                                        send(partner, msgr, strlen(msgr), 0);
+                                                                    } else {
+                                                                        char msgw[MSG_SIZE];
+                                                                        snprintf(msgw, sizeof(msgw), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx_partner]);
+                                                                        char msgr[MSG_SIZE];
+                                                                        snprintf(msgr, sizeof(msgr), "+Ok. Jugador %s ha ganado la partida.\n", usernames[idx_partner]);
+                                                                        send(partner, msgw, strlen(msgw), 0);
+                                                                        send(i, msgr, strlen(msgr), 0);
+                                                                    }
+                                                                }
+                                                                // finalizar y limpiar estado
+                                                                in_game[idx] = 0; in_game[idx_partner] = 0;
+                                                                partner_socket[idx] = -1; partner_socket[idx_partner] = -1;
+                                                                planted[idx] = 0; planted[idx_partner] = 0;
+                                                                turn_owner[idx] = 0; turn_owner[idx_partner] = 0;
+                                                                score[idx] = 0; score[idx_partner] = 0;
+                                                                game_target[idx] = 0; game_target[idx_partner] = 0;
+                                                            } else {
+                                                                // primer jugador en plantarse: esperar al otro
+                                                                bzero(buffer,sizeof(buffer));
+                                                                strcpy(buffer, "+Ok. Esperando que finalice el otro jugador.\n");
+                                                                send(i, buffer, strlen(buffer), 0);
+                                                                // cambiar turno al partner para que pueda decidir plantarse o seguir
+                                                                turn_owner[idx] = 0;
+                                                                turn_owner[idx_partner] = 1;
+                                                                // notificar al partner que su oponente se ha plantado (solo este mensaje)
+                                                                bzero(buffer,sizeof(buffer));
+                                                                strcpy(buffer, "Tu oponente se ha plantado\n");
+                                                                send(partner, buffer, strlen(buffer), 0);
+                                                            }
                                                         }
                                                     }
                                                 } else {
@@ -877,12 +837,7 @@ void salirCliente(int socket, fd_set * readfds, int * numClientes, int arrayClie
     
     (*numClientes)--;
     
-    bzero(buffer,sizeof(buffer));
-    snprintf(buffer, sizeof(buffer), "Desconexión del cliente <%d>\n", socket);
-    
-    for(j=0; j<(*numClientes); j++)
-        if(arrayClientes[j] != socket)
-            send(arrayClientes[j],buffer,strlen(buffer),0);
+    // No notificamos a otros clientes sobre desconexiones para mantener privacidad del cliente.
 
 
 }
